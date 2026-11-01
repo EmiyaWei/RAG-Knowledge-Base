@@ -32,11 +32,8 @@ with st.sidebar:
 st.title("📚 企业级 RAG 智能知识库")
 st.caption("基于 DeepSeek + ChromaDB 构建的检索增强生成系统（支持来源溯源）")
 
-@st.cache_resource
-def get_chroma_client():
-    return chromadb.Client()
-
-chroma_client = get_chroma_client()
+# 删掉那个 @st.cache_resource 的函数，直接暴力持久化
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
