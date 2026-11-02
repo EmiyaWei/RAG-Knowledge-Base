@@ -81,9 +81,17 @@ with st.sidebar:
     st.divider()
     
     if st.button("🧹 清空知识库和对话", use_container_width=True):
+    try:
+        # 尝试删除集合
         chroma_client.delete_collection(name="my_knowledge_base")
-        st.session_state.messages = []
-        st.rerun()
+    except Exception:
+        # 如果集合本来就不存在，就跳过，不报错
+        pass
+    
+    # 清空聊天记录
+    st.session_state.messages = []
+    # 刷新页面
+    st.rerun()
 
 # ==========================================
 # 主界面与 Agent 循环
