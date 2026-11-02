@@ -5,8 +5,9 @@ import os
 from dotenv import load_dotenv
 from pypdf import PdfReader
 from datetime import datetime
+import json
 
-st.set_page_config(page_title="企业级 RAG 知识库", page_icon="📚", layout="wide")
+st.set_page_config(page_title="Agent RAG 知识库", page_icon="🤖", layout="wide")
 
 load_dotenv()
 MY_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -17,20 +18,42 @@ if not MY_API_KEY:
 
 client = OpenAI(api_key=MY_API_KEY, base_url="https://api.deepseek.com")
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
-collection = chroma_client.get_or_create_collection(name="my_knowledge_base")
 
 # ==========================================
-# 侧边栏
+# 定义 AI 可以调用的“工具函数”
+# ==========================================
+def get_current_time():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def search_knowledge_base(query: str):
+    """这是真正的检索工具，AI 会传入 query 去数据库里查"""
+    try:
+        collection = chroma_client.get_collection(name="my_knowledge_base")
+        if collection.count() == 0:
+            return "知识库为空，请先在左侧上传文档。"
+        
+        results = collection.query(query_texts=[query], n_results=3)
+        context = ""
+        if results['documents'] and len(results['documents'][0]) > 0:
+            for i in range(len(results['documents'][0])):
+                doc = results['documents'][0][i]
+                meta = results['metadatas'][0][i]
+                context += f"[来源: {meta['source']} 第{meta['page']}页]: {doc}\n\n"
+        return context if context else "未找到相关内容。"
+    except Exception as e:
+        return f"检索失败: {str(e)}"
+
+# ==========================================
+# 侧边栏（保持多文件管理功能）
 # ==========================================
 with st.sidebar:
     st.title("⚙️ 知识库管理")
-    
-    # 【升级点 1】允许上传多个文件
     uploaded_files = st.file_uploader("上传 TXT 或 PDF 文档 (可多选)", type=["txt", "pdf"], accept_multiple_files=True)
     
     if uploaded_files:
         if st.button("📥 解析并存入新文档"):
             with st.spinner("正在解析文档..."):
+                collection = chroma_client.get_or_create_collection(name="my_knowledge_base")
                 for file in uploaded_files:
                     documents, metadatas, ids = [], [], []
                     if file.name.endswith(".pdf"):
@@ -57,38 +80,16 @@ with st.sidebar:
     
     st.divider()
     
-    # 【升级点 2】展示已有文档，并支持单独删除
-    st.subheader("📂 当前已存文档")
-    existing_data = collection.get()
-    if existing_data and existing_data['metadatas']:
-        # 提取所有唯一的文件名
-        sources = list(set([meta["source"] for meta in existing_data['metadatas']]))
-        for source in sources:
-            col1, col2 = st.columns([0.8, 0.2])
-            with col1:
-                st.write(f"📄 {source}")
-            with col2:
-                if st.button("🗑️", key=f"del_{source}", help="删除此文档"):
-                    # 根据元数据中的文件名删除该文档的所有切片
-                    collection.delete(where={"source": source})
-                    st.rerun()
-    else:
-        st.info("当前知识库为空。")
-        
-    st.divider()
-    
-    top_k = st.slider("检索段落数量 (Top-K)", min_value=1, max_value=5, value=3)
     if st.button("🧹 清空知识库和对话", use_container_width=True):
         chroma_client.delete_collection(name="my_knowledge_base")
-        collection = chroma_client.get_or_create_collection(name="my_knowledge_base")
         st.session_state.messages = []
         st.rerun()
 
 # ==========================================
-# 主界面
+# 主界面与 Agent 循环
 # ==========================================
-st.title("📚 企业级 RAG 智能知识库")
-st.caption("基于 DeepSeek + ChromaDB（支持多文档管理 + 溯源 + Agent）")
+st.title("🤖 Agent 智能路由知识库")
+st.caption("支持多文档管理 + 自动思考调用工具 + 溯源")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -97,8 +98,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 聊天输入
-user_input = st.chat_input("请输入关于文档的问题...")
+user_input = st.chat_input("输入问题，看看 AI 会用什么工具...")
 
 if user_input:
     with st.chat_message("user"):
@@ -106,76 +106,87 @@ if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     
     with st.chat_message("assistant"):
-        with st.spinner("AI 正在检索和思考..."):
-            # 1. 检索
-            query_text = user_input
-            if len(st.session_state.messages) > 1:
-                query_text = st.session_state.messages[-2]["content"] + " " + user_input
+        with st.spinner("AI 正在思考并调度工具..."):
             
-            # 检查知识库是否有内容
-            if collection.count() == 0:
-                context = "知识库为空。"
-            else:
-                results = collection.query(query_texts=[query_text], n_results=top_k)
-                context = ""
-                if results['documents'] and len(results['documents'][0]) > 0:
-                    for i in range(len(results['documents'][0])):
-                        doc = results['documents'][0][i]
-                        meta = results['metadatas'][0][i]
-                        context += f"[文件:{meta['source']} 第{meta['page']}页]: {doc}\n\n"
-            
+            # 1. 告诉大模型，你现在有两个工具
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_current_time",
+                        "description": "获取当前的系统时间",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search_knowledge_base",
+                        "description": "当用户询问文档、文件里的相关内容、考试时间、规定等私有数据时，使用此工具去知识库检索",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string", "description": "搜索的关键词或问题"}
+                            },
+                            "required": ["query"]
+                        },
+                    },
+                }
+            ]
+
             system_prompt = {
                 "role": "system", 
-                "content": f"请根据上下文回答。如果未提及，请说“文档中未提及”。末尾必须标注来源（文件名及页码）。\n\n【上下文片段】：\n{context}"
+                "content": "你是一个智能助手。你可以获取当前时间，也可以查询本地知识库。请根据用户的问题，自主决定调用哪个工具。如果调用了知识库，请在最终回答末尾附带来源。"
             }
-            
-            # 2. 工具
-            tools = [{
-                "type": "function",
-                "function": {
-                    "name": "get_current_time",
-                    "description": "获取当前系统时间",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            }]
 
             messages_for_ai = [system_prompt] + st.session_state.messages
             
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=messages_for_ai,
-                tools=tools,
-                tool_choice="auto",
-                stream=False 
-            )
-            
-            response_msg = response.choices[0].message
-            messages_for_ai.append(response_msg)
+            # 2. Agent 循环（允许 AI 多次调用工具）
+            max_iterations = 3
+            for i in range(max_iterations):
+                response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=messages_for_ai,
+                    tools=tools,
+                    tool_choice="auto",
+                )
+                
+                response_msg = response.choices[0].message
+                messages_for_ai.append(response_msg)
 
-            # 3. 处理工具
-            if response_msg.tool_calls:
-                for tool_call in response_msg.tool_calls:
-                    if tool_call.function.name == "get_current_time":
-                        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # 如果 AI 决定调用工具
+                if response_msg.tool_calls:
+                    for tool_call in response_msg.tool_calls:
+                        function_name = tool_call.function.name
+                        function_args = json.loads(tool_call.function.arguments)
+                        
+                        st.write(f"🛠️ *AI 决定调用工具：`{function_name}`*")
+                        
+                        # 本地执行工具
+                        if function_name == "get_current_time":
+                            result = get_current_time()
+                        elif function_name == "search_knowledge_base":
+                            result = search_knowledge_base(function_args.get("query", ""))
+                        else:
+                            result = "未知工具"
+                            
+                        # 把结果返回给 AI
                         messages_for_ai.append({
                             "tool_call_id": tool_call.id,
                             "role": "tool",
-                            "name": "get_current_time",
-                            "content": current_time,
+                            "name": function_name,
+                            "content": result,
                         })
-                
-                final_response = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=messages_for_ai,
-                    stream=True
-                )
-                ai_reply = st.write_stream(final_response)
-            else:
-                final_response = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=messages_for_ai,
-                    stream=True
-                )
-                ai_reply = st.write_stream(final_response)
+                else:
+                    # AI 没有调用工具，说明它可以直接回答或者已经拿到了足够的信息
+                    break
+            
+            # 3. 最终流式输出（强制要求流式）
+            final_response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=messages_for_ai,
+                stream=True
+            )
+            ai_reply = st.write_stream(final_response)
             
     st.session_state.messages.append({"role": "assistant", "content": ai_reply})
