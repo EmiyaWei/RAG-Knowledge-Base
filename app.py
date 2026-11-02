@@ -17,6 +17,8 @@ if not MY_API_KEY:
     st.stop()
 
 client = OpenAI(api_key=MY_API_KEY, base_url="https://api.deepseek.com")
+
+# 【云端适配】使用 EphemeralClient（内存模式）防止云端写入报错
 chroma_client = chromadb.EphemeralClient()
 
 # ==========================================
@@ -26,7 +28,6 @@ def get_current_time():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def search_knowledge_base(query: str):
-    """这是真正的检索工具，AI 会传入 query 去数据库里查"""
     try:
         collection = chroma_client.get_collection(name="my_knowledge_base")
         if collection.count() == 0:
@@ -40,11 +41,11 @@ def search_knowledge_base(query: str):
                 meta = results['metadatas'][0][i]
                 context += f"[来源: {meta['source']} 第{meta['page']}页]: {doc}\n\n"
         return context if context else "未找到相关内容。"
-    except Exception as e:
-        return f"检索失败: {str(e)}"
+    except Exception:
+        return "知识库为空或检索失败。"
 
 # ==========================================
-# 侧边栏（保持多文件管理功能）
+# 侧边栏
 # ==========================================
 with st.sidebar:
     st.title("⚙️ 知识库管理")
@@ -80,18 +81,29 @@ with st.sidebar:
     
     st.divider()
     
-    if st.button("🧹 清空知识库和对话", use_container_width=True):
+    # 安全地展示已有文档
     try:
-        # 尝试删除集合
-        chroma_client.delete_collection(name="my_knowledge_base")
+        collection = chroma_client.get_collection(name="my_knowledge_base")
+        existing_data = collection.get()
+        if existing_data and existing_data['metadatas']:
+            sources = list(set([meta["source"] for meta in existing_data['metadatas']]))
+            st.subheader("📂 当前已存文档")
+            for source in sources:
+                st.write(f"📄 {source}")
     except Exception:
-        # 如果集合本来就不存在，就跳过，不报错
-        pass
+        pass 
+        
+    st.divider()
     
-    # 清空聊天记录
-    st.session_state.messages = []
-    # 刷新页面
-    st.rerun()
+    # 【修复】安全清空按钮，加了 try-except，再也不会报错了
+    if st.button("🧹 清空知识库和对话", use_container_width=True):
+        try:
+            chroma_client.delete_collection(name="my_knowledge_base")
+        except Exception:
+            pass # 如果本来就没东西，就偷偷跳过，不报错
+            
+        st.session_state.messages = []
+        st.rerun()
 
 # ==========================================
 # 主界面与 Agent 循环
@@ -116,7 +128,6 @@ if user_input:
     with st.chat_message("assistant"):
         with st.spinner("AI 正在思考并调度工具..."):
             
-            # 1. 告诉大模型，你现在有两个工具
             tools = [
                 {
                     "type": "function",
@@ -130,7 +141,7 @@ if user_input:
                     "type": "function",
                     "function": {
                         "name": "search_knowledge_base",
-                        "description": "当用户询问文档、文件里的相关内容、考试时间、规定等私有数据时，使用此工具去知识库检索",
+                        "description": "当用户询问文档、文件里的相关内容等私有数据时，使用此工具去知识库检索",
                         "parameters": {
                             "type": "object",
                             "properties": {
@@ -149,7 +160,6 @@ if user_input:
 
             messages_for_ai = [system_prompt] + st.session_state.messages
             
-            # 2. Agent 循环（允许 AI 多次调用工具）
             max_iterations = 3
             for i in range(max_iterations):
                 response = client.chat.completions.create(
@@ -162,7 +172,6 @@ if user_input:
                 response_msg = response.choices[0].message
                 messages_for_ai.append(response_msg)
 
-                # 如果 AI 决定调用工具
                 if response_msg.tool_calls:
                     for tool_call in response_msg.tool_calls:
                         function_name = tool_call.function.name
@@ -170,7 +179,6 @@ if user_input:
                         
                         st.write(f"🛠️ *AI 决定调用工具：`{function_name}`*")
                         
-                        # 本地执行工具
                         if function_name == "get_current_time":
                             result = get_current_time()
                         elif function_name == "search_knowledge_base":
@@ -178,7 +186,6 @@ if user_input:
                         else:
                             result = "未知工具"
                             
-                        # 把结果返回给 AI
                         messages_for_ai.append({
                             "tool_call_id": tool_call.id,
                             "role": "tool",
@@ -186,10 +193,8 @@ if user_input:
                             "content": result,
                         })
                 else:
-                    # AI 没有调用工具，说明它可以直接回答或者已经拿到了足够的信息
                     break
             
-            # 3. 最终流式输出（强制要求流式）
             final_response = client.chat.completions.create(
                 model="deepseek-chat",
                 messages=messages_for_ai,
