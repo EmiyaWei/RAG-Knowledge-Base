@@ -17,7 +17,7 @@ if not MY_API_KEY:
     st.stop()
 
 client = OpenAI(api_key=MY_API_KEY, base_url="https://api.deepseek.com")
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
+chroma_client = chromadb.EphemeralClient()
 
 # ==========================================
 # 定义 AI 可以调用的“工具函数”
