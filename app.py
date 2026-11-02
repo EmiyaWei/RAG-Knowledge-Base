@@ -18,8 +18,12 @@ if not MY_API_KEY:
 
 client = OpenAI(api_key=MY_API_KEY, base_url="https://api.deepseek.com")
 
-# 【云端适配】使用 EphemeralClient（内存模式）防止云端写入报错
-chroma_client = chromadb.EphemeralClient()
+# 【核心修复】：用缓存锁住内存数据库，防止 Streamlit 刷新页面时被清空
+@st.cache_resource
+def get_chroma_client():
+    return chromadb.EphemeralClient()
+
+chroma_client = get_chroma_client()
 
 # ==========================================
 # 定义 AI 可以调用的“工具函数”
@@ -41,7 +45,7 @@ def search_knowledge_base(query: str):
                 meta = results['metadatas'][0][i]
                 context += f"[来源: {meta['source']} 第{meta['page']}页]: {doc}\n\n"
         return context if context else "未找到相关内容。"
-    except Exception:
+    except Exception as e:
         return "知识库为空或检索失败。"
 
 # ==========================================
@@ -95,12 +99,11 @@ with st.sidebar:
         
     st.divider()
     
-    # 【修复】安全清空按钮，加了 try-except，再也不会报错了
     if st.button("🧹 清空知识库和对话", use_container_width=True):
         try:
             chroma_client.delete_collection(name="my_knowledge_base")
         except Exception:
-            pass # 如果本来就没东西，就偷偷跳过，不报错
+            pass
             
         st.session_state.messages = []
         st.rerun()
