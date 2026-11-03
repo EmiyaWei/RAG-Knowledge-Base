@@ -3,3 +3,4 @@ openai
 chromadb
 python-dotenv
 pypdf
+duckduckgo-search
