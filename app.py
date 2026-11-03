@@ -13,6 +13,7 @@ client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.dee
 @st.cache_resource
 def init_chroma():
     return get_chroma_client()
+
 chroma_client = init_chroma()
 
 with st.sidebar:
@@ -55,20 +56,57 @@ if user_input:
         with st.spinner("AI 正在思考并调度工具..."):
             
             tools = [
-                {"type": "function", "function": {"name": "get_current_time", "description": "获取当前的系统时间", "parameters": {"type": "object", "properties": {}}}},
-                {"type": "function", "function": {"name": "search_knowledge_base", "description": "当用户询问私有文档、文件里的内容时，使用此工具检索本地知识库", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "搜索关键词"}}, "required": ["query"]}}},
-                {"type": "function", "function": {"name": "search_internet", "description": "当用户询问今天发生的新闻、实时天气、或知识库以外的通用知识时，使用此工具进行联网搜索", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "搜索关键词"}}, "required": ["query"]}}}
-            ]
+    {
+        "type": "function", 
+        "function": {
+            "name": "get_current_time", 
+            "description": "获取当前的系统时间", 
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function", 
+        "function": {
+            "name": "search_knowledge_base", 
+            "description": "查找本地上传的私有文档（如PDF、TXT）里的内容。当用户问及他们上传的文件、资料、考试时间、具体规定时，必须使用此工具。", 
+            "parameters": {
+                "type": "object", 
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词"}
+                }, 
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function", 
+        "function": {
+            "name": "search_internet", 
+            "description": "当用户询问今天发生的新闻、实时天气、或非私有文档的通用实时信息时，使用此工具进行联网搜索。", 
+            "parameters": {
+                "type": "object", 
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词"}
+                }, 
+                "required": ["query"]
+            }
+        }
+    }
+]
 
-            # 强化了系统提示词，加上防乱码限制
             system_prompt = {
                 "role": "system", 
-                "content": "你是一个智能助手。你可以获取时间、查询本地知识库、或联网搜索。"
-                           "如果工具返回错误或失败，请立刻停止调用工具，直接用你的通用知识回答用户，"
-                           "⚠️严禁在回答中输出任何类似 <|DSML|> 这种底层系统标签！"
+                "content": (
+                    "你是一个智能路由助手。你必须遵守以下规则：\n"
+                    "1. 当用户询问文档内容（如考试时间、条款、规定）时，必须优先使用 `search_knowledge_base`。\n"
+                    "2. 当用户询问今天新闻、实时天气时，使用 `search_internet`。\n"
+                    "3. 当用户询问现在几点时，使用 `get_current_time`。\n"
+                    "如果工具返回错误或失败，请立刻停止调用该工具，直接用你的通用知识回答，严禁死循环重试！\n"
+                    "⚠️严禁输出任何类似 <|DSML|> 的乱码标签！"
+                )
             }
             
-            # 【核心修复】：这里必须定义 messages_for_ai！
+            # 这里是修复缩进的关键，请确保前面是 12 个空格
             messages_for_ai = [system_prompt] + st.session_state.messages
             
             for i in range(3):
