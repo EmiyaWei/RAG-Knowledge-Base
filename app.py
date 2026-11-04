@@ -3,9 +3,8 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import json
-# 👇 这里就是你需要找的 from tools import，一定要确保引入了 get_weather
 from database import get_chroma_client, process_and_store_files
-from tools import get_current_time, search_knowledge_base, search_internet, get_weather
+from tools import get_current_time, search_knowledge_base, search_internet, get_weather, TOOLS_SCHEMA
 
 st.set_page_config(page_title="Agent RAG 知识库", page_icon="🤖", layout="wide")
 load_dotenv()
@@ -54,81 +53,26 @@ if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     
     with st.chat_message("assistant"):
-        with st.spinner("AI 正在思考并调度工具..."):
-            
-            # 定义所有可用的工具
-            tools = [
-                {
-                    "type": "function", 
-                    "function": {
-                        "name": "get_current_time", 
-                        "description": "获取当前的系统时间", 
-                        "parameters": {"type": "object", "properties": {}}
-                    }
-                },
-                {
-                    "type": "function", 
-                    "function": {
-                        "name": "search_knowledge_base", 
-                        "description": "查找本地上传的私有文档（如PDF、TXT）里的内容。当用户问及他们上传的文件、资料、考试时间、具体规定时，必须使用此工具。", 
-                        "parameters": {
-                            "type": "object", 
-                            "properties": {
-                                "query": {"type": "string", "description": "搜索关键词"}
-                            }, 
-                            "required": ["query"]
-                        }
-                    }
-                },
-                {
-                    "type": "function", 
-                    "function": {
-                        "name": "search_internet", 
-                        "description": "当用户询问今天发生的新闻、或非私有文档的通用实时信息时，使用此工具进行联网搜索。", 
-                        "parameters": {
-                            "type": "object", 
-                            "properties": {
-                                "query": {"type": "string", "description": "搜索关键词"}
-                            }, 
-                            "required": ["query"]
-                        }
-                    }
-                },
-                # 👇 新增的天气工具
-                {
-                    "type": "function", 
-                    "function": {
-                        "name": "get_weather", 
-                        "description": "查询某个城市的实时天气。当用户问今天天气怎么样、下不下雨时使用此工具。", 
-                        "parameters": {
-                            "type": "object", 
-                            "properties": {
-                                "city": {"type": "string", "description": "城市名称，例如：杭州、北京"}
-                            }, 
-                            "required": ["city"]
-                        }
-                    }
-                }
-            ]
-
-            # 强化提示词，让 AI 优先使用真实天气接口
-            system_prompt = {
-                "role": "system", 
-                "content": (
-                    "你是一个智能路由助手。你必须遵守以下规则：\n"
-                    "1. 当用户询问文档内容时，必须使用 `search_knowledge_base`。\n"
-                    "2. 当用户明确问“天气怎么样”时，必须使用 `get_weather` 工具。\n"
-                    "3. 当用户询问现在几点时，使用 `get_current_time`。\n"
-                    "4. 只有当你需要查找最新新闻时，才使用 `search_internet`。\n"
-                    "如果工具返回错误，请立刻停止，用通用知识回答，严禁死循环重试！"
-                )
-            }
-            
-            messages_for_ai = [system_prompt] + st.session_state.messages
-            
+        system_prompt = {
+    "role": "system", 
+    "content": (
+        "你是一个智能路由助手。你必须遵守以下规则：\n"
+        "1. 当用户询问文档内容时，必须使用 `search_knowledge_base`。\n"
+        "2. 当用户明确问“天气怎么样”时，必须使用 `get_weather` 工具。\n"
+        "3. 当用户询问现在几点时，使用 `get_current_time`。\n"
+        "4. 只有当你需要查找最新新闻时，才使用 `search_internet`。\n"
+        # 👇 加上这一条
+        "5. 如果用户先上传了文件再提问，你必须第一时间去查 `search_knowledge_base`，绝对不许先去联网！\n"
+        "如果工具返回错误，请立刻停止，用通用知识回答，严禁死循环重试！"
+    )
+}
+        
+        messages_for_ai = [system_prompt] + st.session_state.messages
+        
+        with st.status("🧠 AI 正在思考并调度工具...", expanded=True) as status:
             for i in range(3):
                 response = client.chat.completions.create(
-                    model="deepseek-chat", messages=messages_for_ai, tools=tools, tool_choice="auto"
+                    model="deepseek-chat", messages=messages_for_ai, tools=TOOLS_SCHEMA, tool_choice="auto"
                 )
                 response_msg = response.choices[0].message
                 messages_for_ai.append(response_msg)
@@ -137,7 +81,8 @@ if user_input:
                     for tool_call in response_msg.tool_calls:
                         func_name = tool_call.function.name
                         args = json.loads(tool_call.function.arguments)
-                        st.write(f"🛠️ *AI 决定调用工具：`{func_name}`*")
+                        
+                        st.write(f"🔍 发现需要调用工具：`{func_name}`，参数：`{args}`")
                         
                         if func_name == "get_current_time":
                             result = get_current_time()
@@ -156,7 +101,9 @@ if user_input:
                 else:
                     break
             
-            final_response = client.chat.completions.create(model="deepseek-chat", messages=messages_for_ai, stream=True)
-            ai_reply = st.write_stream(final_response)
-            
+            status.update(label="✅ 工具调用完成！", state="complete", expanded=False)
+
+        final_response = client.chat.completions.create(model="deepseek-chat", messages=messages_for_ai, stream=True)
+        ai_reply = st.write_stream(final_response)
+        
     st.session_state.messages.append({"role": "assistant", "content": ai_reply})
