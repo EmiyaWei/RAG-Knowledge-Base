@@ -1,3 +1,19 @@
+import requests # 【新增】用于发送网络请求
+
+# ... (保留你之前的 get_current_time 和 search_knowledge_base 等代码) ...
+
+# 【新增】真实的天气查询工具
+def get_weather(city: str):
+    try:
+        # 调用免费的天气 API 接口（支持中文城市名）
+        url = f"https://wttr.in/{city}?format=3&lang=zh"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return f"实时天气信息：{response.text.strip()}"
+        else:
+            return "天气查询失败，无法获取数据。"
+    except Exception as e:
+        return f"天气查询出错：{str(e)}"
 from datetime import datetime
 from duckduckgo_search import DDGS
 
