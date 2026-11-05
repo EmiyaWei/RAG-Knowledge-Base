@@ -53,17 +53,20 @@ if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     
     with st.chat_message("assistant"):
+        # 温和且清晰的提示词
         system_prompt = {
     "role": "system", 
     "content": (
-        "你是一个智能路由助手。你必须遵守以下规则：\n"
-        "1. 当用户询问文档内容时，必须使用 `search_knowledge_base`。\n"
-        "2. 当用户明确问“天气怎么样”时，必须使用 `get_weather` 工具。\n"
-        "3. 当用户询问现在几点时，使用 `get_current_time`。\n"
-        "4. 只有当你需要查找最新新闻时，才使用 `search_internet`。\n"
-        # 👇 加上这一条
-        "5. 如果用户先上传了文件再提问，你必须第一时间去查 `search_knowledge_base`，绝对不许先去联网！\n"
-        "如果工具返回错误，请立刻停止，用通用知识回答，严禁死循环重试！"
+        "你是一个智能助手。请根据用户的意图，使用相应的工具。\n"
+        "1. 如果用户问文档内容，使用 search_knowledge_base。\n"
+        "⚠️【检索核心指令】：\n"
+        "（1）传入的 query 必须是精炼的关键词。\n"
+        "（2）如果你发现查出来的内容与你问的问题无关，请立刻改变关键词再查一次。\n"
+        # 👇 核心杀手锏：必须按指定格式输出
+        "（3）如果你调用了工具并查到了内容，你在最终回复时，**必须直接以冒号开头并列出条款（如：一、考试时间：... 二、报名资格：...）**，绝对禁止使用“以上就是”、“已为您列出”这种敷衍的词语！如果查不到，直接说“未提及”。\n"
+        "2. 如果用户问天气，使用 get_weather。\n"
+        "3. 如果用户问时间，使用 get_current_time。\n"
+        "4. ⚠️严禁输出任何 `<|DSML|>` 标签！"
     )
 }
         
@@ -82,7 +85,7 @@ if user_input:
                         func_name = tool_call.function.name
                         args = json.loads(tool_call.function.arguments)
                         
-                        st.write(f"🔍 发现需要调用工具：`{func_name}`，参数：`{args}`")
+                        st.write(f"🔍 调用工具：`{func_name}`，参数：`{args}`")
                         
                         if func_name == "get_current_time":
                             result = get_current_time()
@@ -94,6 +97,10 @@ if user_input:
                             result = get_weather(args.get("city", "杭州"))
                         else:
                             result = "未知工具"
+                        
+                        # 👇 教练帮你加上了透视镜，你想看后台抓了啥就点开
+                        with st.expander(f"👀 查看 {func_name} 的返回结果"):
+                            st.info(result)
                             
                         messages_for_ai.append({
                             "tool_call_id": tool_call.id, "role": "tool", "name": func_name, "content": result
@@ -103,6 +110,7 @@ if user_input:
             
             status.update(label="✅ 工具调用完成！", state="complete", expanded=False)
 
+        # 最终流式输出
         final_response = client.chat.completions.create(model="deepseek-chat", messages=messages_for_ai, stream=True)
         ai_reply = st.write_stream(final_response)
         
