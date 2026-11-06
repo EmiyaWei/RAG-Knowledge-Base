@@ -1,11 +1,12 @@
 import chromadb
-import pdfplumber # 👈 换用这个神器
+from pypdf import PdfReader
+import pdfplumber # 咱们昨天换的神器
 
+# 👇 【升级点 1】使用 PersistentClient，将数据存入本地硬盘的 chroma_db 文件夹
 def get_chroma_client():
-    return chromadb.EphemeralClient()
+    return chromadb.PersistentClient(path="./chroma_db")
 
 def smart_split_text(text, chunk_size=500, overlap=50):
-    # （切片函数保持不变）
     paragraphs = text.split("\n")
     chunks = []
     current_chunk = ""
@@ -26,26 +27,33 @@ def smart_split_text(text, chunk_size=500, overlap=50):
 
 def process_and_store_files(chroma_client, uploaded_files):
     collection = chroma_client.get_or_create_collection(name="my_knowledge_base")
+    
     for file in uploaded_files:
+        # 👇 【升级点 2】避免重复上传同一个文件（先删掉旧的）
+        try:
+            collection.delete(where={"source": file.name})
+        except Exception:
+            pass 
+            
         documents, metadatas, ids = [], [], []
         if file.name.endswith(".pdf"):
-            # 👇 这里换成了 pdfplumber 来提取文字
             with pdfplumber.open(file) as pdf:
                 for page_num, page in enumerate(pdf.pages, start=1):
                     text = page.extract_text()
                     if text:
                         chunks = smart_split_text(text, chunk_size=500, overlap=50)
-                        for chunk in chunks:
+                        for i, chunk in enumerate(chunks):
                             documents.append(chunk)
+                            # 👇 核心：给每个切片打上“属于哪个文件”的标签
                             metadatas.append({"source": file.name, "page": page_num})
-                            ids.append(f"{file.name}_p{page_num}_{len(ids)}")
+                            ids.append(f"{file.name}_p{page_num}_{i}")
         else:
             text = file.read().decode("utf-8")
             chunks = smart_split_text(text, chunk_size=500, overlap=50)
-            for chunk in chunks:
+            for i, chunk in enumerate(chunks):
                 documents.append(chunk)
                 metadatas.append({"source": file.name, "page": "TXT"})
-                ids.append(f"{file.name}_txt_{len(ids)}")
+                ids.append(f"{file.name}_txt_{i}")
         
         if documents:
             collection.add(documents=documents, metadatas=metadatas, ids=ids)
