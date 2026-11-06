@@ -10,21 +10,46 @@ def search_knowledge_base(chroma_client, query: str):
         collection = chroma_client.get_collection(name="my_knowledge_base")
         if collection.count() == 0:
             return "知识库为空，请先上传文档。"
-        results = collection.query(query_texts=[query], n_results=5)
-        context = ""
-        if results['documents'] and len(results['documents'][0]) > 0:
-            for i in range(len(results['documents'][0])):
-                doc = results['documents'][0][i]
-                meta = results['metadatas'][0][i]
-                context += f"[来源: {meta['source']} 第{meta['page']}页]: {doc}\n\n"
         
-        # 👇 【新增】如果抓出来的字少于 20 个，说明肯定没查准，直接报错
-        if len(context.strip()) < 20:
-            return "【系统提示】未检索到相关有效内容，请直接告诉用户文档中没有提及。"
+        # 1. 向量检索：捞语义最相近的 3 段
+        vector_results = collection.query(query_texts=[query], n_results=3)
+        
+        # 2. 关键词检索：暴力捞包含 query 原词的段落（最多捞3段）
+        keyword_results = collection.query(
+            query_texts=[query],
+            n_results=3,
+            # 这里的 $contains 相当于 SQL 里的 LIKE '%query%'
+            where_document={"$contains": query} 
+        )
+        
+        # 3. 把两拨捞出来的结果合并去重
+        final_docs = []
+        final_metas = []
+        
+        # 先装向量检索捞出来的
+        if vector_results['documents'] and len(vector_results['documents'][0]) > 0:
+            for i in range(len(vector_results['documents'][0])):
+                final_docs.append(vector_results['documents'][0][i])
+                final_metas.append(vector_results['metadatas'][0][i])
+                
+        # 再装关键词暴力捞出来的（如果有的话）
+        if keyword_results['documents'] and len(keyword_results['documents'][0]) > 0:
+            for i in range(len(keyword_results['documents'][0])):
+                # 去重：如果这段内容已经在里面了，就不重复加了
+                if keyword_results['documents'][0][i] not in final_docs:
+                    final_docs.append(keyword_results['documents'][0][i])
+                    final_metas.append(keyword_results['metadatas'][0][i])
+        
+        # 4. 拼装成最终上下文
+        context = ""
+        for i in range(len(final_docs)):
+            doc = final_docs[i]
+            meta = final_metas[i]
+            context += f"[来源: {meta['source']} 第{meta['page']}页]: {doc}\n\n"
             
         return context if context else "未找到相关内容。"
-    except Exception:
-        return "检索失败。"
+    except Exception as e:
+        return f"检索失败: {str(e)}"
 
 def search_internet(query: str):
     try:
