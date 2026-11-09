@@ -3,9 +3,9 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import json
-# 👇 导入咱们的基础设施
 from database import get_chroma_client, process_and_store_files
 from tools import get_current_time, search_knowledge_base, search_internet, get_weather, TOOLS_SCHEMA
+import history_db # 👈 导入刚刚写的数据库管家
 
 st.set_page_config(page_title="Agent RAG 知识库", page_icon="🤖", layout="wide")
 load_dotenv()
@@ -18,10 +18,11 @@ def init_chroma():
 chroma_client = init_chroma()
 
 # ==========================================
-# 左侧边栏：文件管理器（升级版）
+# 左侧边栏：知识库与文件管理
 # ==========================================
 with st.sidebar:
     st.title("⚙️ 知识库管理")
+    # 👇 核心修复区：这里的缩进必须完全对齐
     uploaded_files = st.file_uploader("上传 TXT 或 PDF 文档 (可多选)", type=["txt", "pdf"], accept_multiple_files=True)
     
     if uploaded_files:
@@ -62,47 +63,46 @@ with st.sidebar:
         except Exception:
             pass
         st.session_state.messages = []
+        history_db.clear_messages() # 👈 清空数据库里的聊天记录
         st.rerun()
 
 # ==========================================
-# 主界面：聊天与 Agent 路由（你刚刚丢掉的部分）
+# 主界面：聊天与 Agent 路由
 # ==========================================
 st.title("🤖 模块化 Agent 智能路由")
 st.caption("支持本地文档检索 + 真实天气查询 + 实时时间")
 
+# 👇 从 SQLite 数据库里读取真实的历史记录（刷新不丢失）
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = history_db.get_all_messages()
 
-# 渲染历史聊天记录
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 👇 你的打字框在这里！！！
 user_input = st.chat_input("输入问题，看看 AI 会用什么工具...")
 
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
+    history_db.save_message("user", user_input) # 👈 存进数据库
     
     with st.chat_message("assistant"):
         system_prompt = {
-    "role": "system", 
-    "content": (
-        "你是一个智能助手。请根据用户的意图，使用相应的工具。\n"
-        "1. 如果用户问文档内容，使用 search_knowledge_base。\n"
-        "⚠️【检索核心指令】：\n"
-        "（1）传入的 query 必须是精炼的关键词。\n"
-        # 👇 加上这句
-        "（2）如果你搜'报名资格'没查到确切的 1、2、3 条款，请立刻把搜索词换成'报考条件'、'哪些人可以报名'或'报名对象'再搜一次！\n"
-        "（3）如果你发现查出来的内容与你问的问题无关，请立刻改变关键词再查一次。\n"
-        "（4）如果你调用了工具并查到了内容，你在最终回复时，**必须直接以冒号开头并列出条款**，绝对禁止敷衍！如果查不到，直接说“未提及”。\n"
-        "2. 如果用户问天气，使用 get_weather。\n"
-        "3. 如果用户问时间，使用 get_current_time。\n"
-        "4. ⚠️严禁输出任何 `<|DSML|>` 标签！"
-    )
-}
+            "role": "system", 
+            "content": (
+                "你是一个智能助手。请根据用户的意图，使用相应的工具。\n"
+                "1. 如果用户问文档内容，使用 search_knowledge_base。\n"
+                "⚠️【检索核心指令】：\n"
+                "（1）传入的 query 必须是精炼的关键词。\n"
+                "（2）如果你发现查出来的内容与你问的问题无关，请立刻改变关键词再查一次。\n"
+                "（3）如果你调用了工具并查到了内容，你在最终回复时，**必须直接以冒号开头并列出条款**，绝对禁止使用“以上就是”、“已为您列出”这种敷衍的词语！如果查不到，直接说“未提及”。\n"
+                "2. 如果用户问天气，使用 get_weather。\n"
+                "3. 如果用户问时间，使用 get_current_time。\n"
+                "4. ⚠️严禁输出任何 `<|DSML|>` 标签！"
+            )
+        }
         
         messages_for_ai = [system_prompt] + st.session_state.messages
         
@@ -147,3 +147,4 @@ if user_input:
         ai_reply = st.write_stream(final_response)
         
     st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+    history_db.save_message("assistant", ai_reply) # 👈 存进数据库
