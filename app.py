@@ -4,147 +4,82 @@ import os
 from dotenv import load_dotenv
 import json
 from database import get_chroma_client, process_and_store_files
-from tools import get_current_time, search_knowledge_base, search_internet, get_weather, TOOLS_SCHEMA
-import history_db # 👈 导入刚刚写的数据库管家
+# 👇 导入你的超级机器人
+from agent_class import MyAgent 
 
 st.set_page_config(page_title="Agent RAG 知识库", page_icon="🤖", layout="wide")
 load_dotenv()
-client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
 
+# ==========================================
+# 1. 初始化机器人与仓库
+# ==========================================
 @st.cache_resource
 def init_chroma():
     return get_chroma_client()
 
 chroma_client = init_chroma()
 
+if "my_agent" not in st.session_state:
+    st.session_state.my_agent = MyAgent(name="曹江韦的网页机器人")
+    
+agent = st.session_state.my_agent
+
 # ==========================================
-# 左侧边栏：知识库与文件管理
+# 2. 左侧边栏：知识库管理
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 知识库管理")
-    # 👇 核心修复区：这里的缩进必须完全对齐
+    st.title("大肥鱼的超级AI人民共和国")
     uploaded_files = st.file_uploader("上传 TXT 或 PDF 文档 (可多选)", type=["txt", "pdf"], accept_multiple_files=True)
     
     if uploaded_files:
         if st.button("📥 解析并存入新文档"):
             with st.spinner("正在解析文档..."):
-                process_and_store_files(chroma_client, uploaded_files)
-                st.success("✅ 文档已存入硬盘！")
+                process_and_store_files(agent.chroma_client, uploaded_files)
+                st.success("✅ 文档已存入大脑！")
                 st.rerun() 
     
     st.divider()
     
-    st.subheader("📂 已存文档列表")
-    try:
-        collection = chroma_client.get_collection(name="my_knowledge_base")
-        all_data = collection.get()
-        
-        if all_data and all_data['metadatas']:
-            sources = list(set([meta["source"] for meta in all_data['metadatas']]))
-            
-            for source in sources:
-                col1, col2 = st.columns([0.8, 0.2])
-                with col1:
-                    st.write(f"📄 {source}")
-                with col2:
-                    if st.button("🗑️", key=f"del_{source}"):
-                        collection.delete(where={"source": source})
-                        st.rerun()
-        else:
-            st.info("知识库为空，请先上传。")
-    except Exception:
-        st.info("知识库为空，请先上传。")
-
-    st.divider()
-    
     if st.button("🧹 清空所有文档和对话", use_container_width=True):
         try:
-            chroma_client.delete_collection(name="my_knowledge_base")
+            agent.chroma_client.delete_collection(name="my_knowledge_base")
         except Exception:
             pass
         st.session_state.messages = []
-        history_db.clear_messages() # 👈 清空数据库里的聊天记录
         st.rerun()
 
 # ==========================================
-# 主界面：聊天与 Agent 路由
+# 3. 主界面：聊天
 # ==========================================
-st.title("🤖 模块化 Agent 智能路由")
-st.caption("支持本地文档检索 + 真实天气查询 + 实时时间")
+st.title("🤖 模块化 Agent 智能路由 (流式版)")
+st.caption("底层使用面向对象封装的 MyAgent，支持打字机输出")
 
-# 👇 从 SQLite 数据库里读取真实的历史记录（刷新不丢失）
+# 渲染历史聊天记录
 if "messages" not in st.session_state:
-    st.session_state.messages = history_db.get_all_messages()
+    st.session_state.messages = []
 
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    if msg["role"] != "system":
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
 user_input = st.chat_input("输入问题，看看 AI 会用什么工具...")
 
+# 👇👇👇 【第二步修改的地方就在这下面！】 👇👇👇
 if user_input:
+    # 1. 显示用户的气泡
     with st.chat_message("user"):
         st.markdown(user_input)
+    # 存入网页的记忆
     st.session_state.messages.append({"role": "user", "content": user_input})
-    history_db.save_message("user", user_input) # 👈 存进数据库
     
+    # 2. 显示 AI 的气泡
     with st.chat_message("assistant"):
-        system_prompt = {
-            "role": "system", 
-            "content": (
-                "你是一个智能助手。请根据用户的意图，使用相应的工具。\n"
-                "1. 如果用户问文档内容，使用 search_knowledge_base。\n"
-                "⚠️【检索核心指令】：\n"
-                "（1）传入的 query 必须是精炼的关键词。\n"
-                "（2）如果你发现查出来的内容与你问的问题无关，请立刻改变关键词再查一次。\n"
-                "（3）如果你调用了工具并查到了内容，你在最终回复时，**必须直接以冒号开头并列出条款**，绝对禁止使用“以上就是”、“已为您列出”这种敷衍的词语！如果查不到，直接说“未提及”。\n"
-                "2. 如果用户问天气，使用 get_weather。\n"
-                "3. 如果用户问时间，使用 get_current_time。\n"
-                "4. ⚠️严禁输出任何 `<|DSML|>` 标签！"
-            )
-        }
-        
-        messages_for_ai = [system_prompt] + st.session_state.messages
-        
-        with st.status("🧠 AI 正在思考并调度工具...", expanded=True) as status:
-            for i in range(3):
-                response = client.chat.completions.create(
-                    model="deepseek-chat", messages=messages_for_ai, tools=TOOLS_SCHEMA, tool_choice="auto"
-                )
-                response_msg = response.choices[0].message
-                messages_for_ai.append(response_msg)
-
-                if response_msg.tool_calls:
-                    for tool_call in response_msg.tool_calls:
-                        func_name = tool_call.function.name
-                        args = json.loads(tool_call.function.arguments)
-                        
-                        st.write(f"🔍 调用工具：`{func_name}`，参数：`{args}`")
-                        
-                        if func_name == "get_current_time":
-                            result = get_current_time()
-                        elif func_name == "search_knowledge_base":
-                            result = search_knowledge_base(chroma_client, args.get("query", ""))
-                        elif func_name == "search_internet":
-                            result = search_internet(args.get("query", ""))
-                        elif func_name == "get_weather":
-                            result = get_weather(args.get("city", "杭州"))
-                        else:
-                            result = "未知工具"
-                        
-                        with st.expander(f"👀 查看 {func_name} 的返回结果"):
-                            st.info(result)
-                            
-                        messages_for_ai.append({
-                            "tool_call_id": tool_call.id, "role": "tool", "name": func_name, "content": result
-                        })
-                else:
-                    break
+        with st.spinner("AI 正在翻阅记忆并调度工具..."):
             
-            status.update(label="✅ 工具调用完成！", state="complete", expanded=False)
-
-        final_response = client.chat.completions.create(model="deepseek-chat", messages=messages_for_ai, stream=True)
-        ai_reply = st.write_stream(final_response)
-        
+            # 💥 核心变化：用 st.write_stream 接住流式数据！
+            # 这里的 agent.stream_run 就是你刚刚在 agent_class.py 里加的那个带 yield 的方法
+            ai_reply = st.write_stream(agent.stream_run(user_input))
+            
+    # 3. 把完整的回答存入网页的记忆
     st.session_state.messages.append({"role": "assistant", "content": ai_reply})
-    history_db.save_message("assistant", ai_reply) # 👈 存进数据库
