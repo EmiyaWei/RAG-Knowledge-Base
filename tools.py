@@ -118,5 +118,50 @@ TOOLS_SCHEMA = [
                 "required": ["city"]
             }
         }
+    },
+    {
+    "type": "function", 
+    "function": {
+        "name": "search_github_repos", 
+        "description": "当用户想要找代码、找开源项目、或者查 GitHub 上的相关技术时，使用此工具搜索。", 
+        "parameters": {
+            "type": "object", 
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词，例如：RAG、大模型"}
+            }, 
+            "required": ["query"]
+            }
+        }
     }
 ]
+
+def search_github_repos(query: str):
+    """
+    搜索 GitHub 上的开源项目
+    """
+    try:
+        # 这是 GitHub 官方提供的免费接口，不需要填 Key
+        url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=3"
+        # 必须加请求头，否则 GitHub 会拒绝
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get("items", [])
+            if not items:
+                return "没有搜到相关的开源项目。"
+            
+            # 咱们今天刚学了 f-string 和 enumerate，用起来！
+            result_text = f"为你找到关于 '{query}' 最火的 3 个开源项目：\n"
+            for index, repo in enumerate(items, start=1):
+                name = repo["full_name"]
+                stars = repo["stargazers_count"]
+                desc = repo["description"]
+                url_link = repo["html_url"]
+                result_text += f"{index}. 名称：{name} (🌟 {stars} stars)\n   简介：{desc}\n   链接：{url_link}\n\n"
+            return result_text
+        else:
+            return "Github 搜索接口报错。"
+    except Exception as e:
+        return f"搜索失败：{str(e)}"

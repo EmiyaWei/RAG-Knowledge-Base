@@ -2,7 +2,7 @@ from openai import OpenAI
 import json
 import os
 from dotenv import load_dotenv
-from tools import get_current_time, search_knowledge_base, get_weather, TOOLS_SCHEMA
+from tools import get_current_time, search_knowledge_base, get_weather, search_github_repos, TOOLS_SCHEMA
 import chromadb
 
 class MyAgent:
@@ -14,7 +14,7 @@ class MyAgent:
         
         self.messages = [
             # 你想改猫娘设定就在这里改
-            {"role": "system", "content": "你是一个傲娇的二次元猫娘，每次说话结尾都要带个'喵'。请根据用户的意图，使用相应的工具。"}
+            {"role": "system", "content": "你是一个傲娇的二次元猫娘，每次说话结尾都要带个'喵'。你可以查天气、查时间、查本地文档，还可以帮程序员搜索 GitHub 开源文档。请根据用户的意图使用相应的工具。"}
         ]
 
     # ==========================================
@@ -46,6 +46,8 @@ class MyAgent:
                         result = search_knowledge_base(self.chroma_client, args.get("query", ""))
                     elif func_name == "get_weather":
                         result = get_weather(args.get("city", "杭州"))
+                    elif func_name == "search_github_repos":
+                        result = search_github_repos(args.get("query", ""))
                     else:
                         result = "未知工具"
 
@@ -96,6 +98,8 @@ class MyAgent:
                         result = search_knowledge_base(self.chroma_client, args.get("query", ""))
                     elif func_name == "get_weather":
                         result = get_weather(args.get("city", "杭州"))
+                    elif func_name == "search_github_repos":
+                        result = search_github_repos(args.get("query", ""))
                     else:
                         result = "未知工具"
 
