@@ -4,6 +4,11 @@ import os
 from dotenv import load_dotenv
 from tools import get_current_time, search_knowledge_base, get_weather, search_github_repos, TOOLS_SCHEMA
 import chromadb
+# ... 其他 import ...
+
+# 清除 ChromaDB 的全局系统缓存
+chromadb.api.client.SharedSystemClient.clear_system_cache()
+
 
 class MyAgent:
     def __init__(self, name="小助手"):
