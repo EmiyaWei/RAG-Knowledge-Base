@@ -2,13 +2,20 @@ from openai import OpenAI
 import json
 import os
 from dotenv import load_dotenv
-from tools import get_current_time, search_knowledge_base, get_weather, search_github_repos, TOOLS_SCHEMA
+from tools import get_current_time, search_knowledge_base, get_weather, search_github_repos, extract_file_info, analyze_excel, TOOLS_SCHEMA
 import chromadb
+import time
 # ... 其他 import ...
 
 # 清除 ChromaDB 的全局系统缓存
 chromadb.api.client.SharedSystemClient.clear_system_cache()
-
+def log_execution(func):
+    def wrapper(self, user_input, *args, **kwargs):
+        print(f"📝 [系统日志] 用户发起请求：{user_input[:15]}...")
+        result = func(self, user_input, *args, **kwargs)
+        print(f"📝 [系统日志] AI 处理完毕。")
+        return result
+    return wrapper
 
 class MyAgent:
     def __init__(self, name="小助手"):
@@ -25,6 +32,7 @@ class MyAgent:
     # ==========================================
     # 原有的普通 run 方法（用于终端测试）
     # ==========================================
+    @log_execution
     def run(self, user_input):
         print(f"[{self.name}] 正在思考...")
         self.messages.append({"role": "user", "content": user_input})
@@ -53,6 +61,10 @@ class MyAgent:
                         result = get_weather(args.get("city", "杭州"))
                     elif func_name == "search_github_repos":
                         result = search_github_repos(args.get("query", ""))
+                    elif func_name == "extract_file_info":
+                        result = extract_file_info(args.get("text", ""))
+                    elif func_name == "analyze_excel":
+                        result = analyze_excel(args.get("file_path", ""), args.get("question", ""))
                     else:
                         result = "未知工具"
 
@@ -76,6 +88,7 @@ class MyAgent:
     # ==========================================
     # 新增的流式 stream_run 方法（用于网页打字机）
     # ==========================================
+    @log_execution
     def stream_run(self, user_input):
         print(f"[{self.name}] 正在流式思考...")
         self.messages.append({"role": "user", "content": user_input})
@@ -105,6 +118,8 @@ class MyAgent:
                         result = get_weather(args.get("city", "杭州"))
                     elif func_name == "search_github_repos":
                         result = search_github_repos(args.get("query", ""))
+                    elif func_name == "analyze_excel":
+                        result = analyze_excel(args.get("file_path", ""), args.get("question", ""))
                     else:
                         result = "未知工具"
 
@@ -132,3 +147,9 @@ class MyAgent:
                 yield text 
                 
         self.messages.append({"role": "assistant", "content": full_answer})
+
+if __name__ == "__main__":
+    gou_dan = MyAgent(name="曹江韦的专属AI")
+    # 测试 Excel 分析功能
+    answer = gou_dan.run("帮本喵分析一下 员工工资表.xlsx 里 AI研发 部门的员工是谁，顺便看看平均工资是多少喵！")
+    print(answer)

@@ -1,9 +1,14 @@
 from datetime import datetime
 from duckduckgo_search import DDGS
 import requests
+import re
+import pandas as pd
 
 def get_current_time():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def clean_text(text):
+    return " ".join(text.split())
 
 def search_knowledge_base(chroma_client, query: str):
     try:
@@ -50,6 +55,15 @@ def search_knowledge_base(chroma_client, query: str):
         return context if context else "未找到相关内容。"
     except Exception as e:
         return f"检索失败: {str(e)}"
+
+        if results['documents'] and len(results['documents'][0]) > 0:
+            for i in range(len(results['documents'][0])):
+                doc = results['documents'][0][i]
+                meta = results['metadatas'][0][i]
+                # 👇 这里把 doc 洗一下再拼接！
+                clean_doc = clean_text(doc)
+                context += f"[来源: {meta['source']} 第{meta['page']}页]: {clean_doc}\n\n"
+        return context if context else "未找到相关内容。"
 
 def search_internet(query: str):
     try:
@@ -132,7 +146,36 @@ TOOLS_SCHEMA = [
             "required": ["query"]
             }
         }
-    }
+    },
+    {
+    "type": "function", 
+    "function": {
+        "name": "extract_file_info", 
+        "description": "当你需要从一大段文本中精准提取电话号码、日期或者金额时，使用此工具。", 
+        "parameters": {
+            "type": "object", 
+            "properties": {
+                "text": {"type": "string", "description": "需要提取信息的原始长文本"}
+            }, 
+            "required": ["text"]
+            }
+        }
+    },
+    {
+    "type": "function", 
+    "function": {
+        "name": "analyze_excel", 
+        "description": "当用户需要读取或分析 Excel 表格文件时使用。", 
+        "parameters": {
+            "type": "object", 
+            "properties": {
+                "file_path": {"type": "string", "description": "Excel文件的路径，例如：员工工资表.xlsx"},
+                "question": {"type": "string", "description": "用户关于表格的问题"}
+            }, 
+            "required": ["file_path", "question"]
+            }
+        }
+    }   
 ]
 
 def search_github_repos(query: str):
@@ -165,3 +208,56 @@ def search_github_repos(query: str):
             return "Github 搜索接口报错。"
     except Exception as e:
         return f"搜索失败：{str(e)}"
+
+import re
+
+def extract_file_info(text: str):
+    try:
+        # 提取手机号
+        phones = re.findall(r"\d{11}", text)
+        # 提取日期（格式如 2023-06-17 或 2023年06月17日）
+        dates = re.findall(r"\d{4}[-年]\d{1,2}[-月]\d{1,2}日?", text)
+        # 提取金额（后面带“元”的数字）
+        amounts = re.findall(r"\d+\.?\d*\s*元", text) 
+        
+        result = "提取结果如下喵：\n"
+        if phones: result += f"📞 电话：{', '.join(phones)}\n"
+        if dates: result += f"📅 日期：{', '.join(dates)}\n"
+        if amounts: result += f"💰 金额：{', '.join(amounts)}\n"
+            
+        if result == "提取结果如下喵：\n":
+            return "文档中未找到明确的电话、日期或金额。"
+        return result
+    except Exception as e:
+        return f"提取失败：{str(e)}"
+
+def analyze_excel(file_path: str, question: str):
+    try:
+        df = pd.read_excel(file_path)
+        result = "帮你分析好啦喵：\n"
+        has_answer = False 
+        
+        # 👇 如果问了特定的部门
+        if "部门" in question:
+            for dept in df["部门"].unique():
+                if dept in question:
+                    subset = df[df["部门"] == dept]
+                    result += f"📁 {dept} 的员工有：{', '.join(subset['姓名'].tolist())}\n"
+                    has_answer = True
+                    
+                    # 👇 【神仙升级】：如果问题里同时包含了“工资”或“平均”，就单独算这个部门的平均！
+                    if "工资" in question or "平均" in question:
+                        dept_avg = subset['工资'].mean()
+                        result += f"💰 {dept} 部门的平均工资是：{dept_avg} 元\n"
+        
+        # 👇 如果只问了全公司工资，没问部门
+        elif "工资" in question or "平均" in question:
+            avg = df['工资'].mean()
+            result += f"💰 全公司的平均工资是：{avg} 元\n"
+            has_answer = True
+            
+        if not has_answer:
+            return "我读取了表格，但不知道怎么回答你的问题，你可以问问部门或者平均工资喵。"
+        return result
+    except Exception as e:
+        return f"读取 Excel 失败：{str(e)}"
