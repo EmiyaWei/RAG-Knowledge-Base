@@ -6,3 +6,5 @@ pypdf
 pdfplumber
 requests
 duckduckgo-search
+pandas
+openpyxl
