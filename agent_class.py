@@ -3,12 +3,10 @@ import json
 import os
 from dotenv import load_dotenv
 from tools import get_current_time, search_knowledge_base, get_weather, search_github_repos, extract_file_info, analyze_excel, TOOLS_SCHEMA
-import chromadb
 import time
-# ... 其他 import ...
-
-# 清除 ChromaDB 的全局系统缓存
+import chromadb
 chromadb.api.client.SharedSystemClient.clear_system_cache()
+
 def log_execution(func):
     def wrapper(self, user_input, *args, **kwargs):
         print(f"📝 [系统日志] 用户发起请求：{user_input[:15]}...")
