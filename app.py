@@ -29,14 +29,21 @@ agent = st.session_state.my_agent
 # ==========================================
 with st.sidebar:
     st.title("大肥鱼的超级AI人民共和国")
-    uploaded_files = st.file_uploader("上传 TXT 或 PDF 文档 (可多选)", type=["txt", "pdf"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("上传文档 (支持 TXT, PDF, XLSX)", type=["txt", "pdf", "xlsx"], accept_multiple_files=True)
     
     if uploaded_files:
-        if st.button("📥 解析并存入新文档"):
-            with st.spinner("正在解析文档..."):
-                process_and_store_files(agent.chroma_client, uploaded_files)
-                st.success("✅ 文档已存入大脑！")
-                st.rerun() 
+    # 👇 新增：如果是 Excel 文件，直接在云端服务器存一份，供 pandas 读取
+    for file in uploaded_files:
+        if file.name.endswith(".xlsx"):
+            with open(file.name, "wb") as f:
+                f.write(file.getbuffer())
+            st.success(f"✅ Excel 文件 {file.name} 已上传到云端！")
+
+    # 下面是你原本的存入数据库逻辑，保持不变
+    if st.button("📥 解析并存入新文档"):
+        with st.spinner("正在解析文档..."):
+            process_and_store_files(agent.chroma_client, uploaded_files)
+            # ... 后面不变 ...
     
     st.divider()
     
