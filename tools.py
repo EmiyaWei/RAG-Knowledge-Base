@@ -237,7 +237,14 @@ def analyze_excel(file_path: str, question: str):
         result = "帮你分析好啦喵：\n"
         has_answer = False 
         
-        # 👇 如果问了特定的部门
+        # 👇 1. 最高优先级：查哪个部门工资最高
+        if "最高" in question or "最有钱" in question:
+            dept_avg = df.groupby("部门")["工资"].mean()
+            top_dept = dept_avg.idxmax()
+            top_salary = dept_avg.max()
+            return f"查好啦喵！全公司平均工资最高的部门是【{top_dept}】，他们的平均工资高达 {top_salary} 元喵！"
+
+        # 👇 2. 查具体部门
         if "部门" in question:
             for dept in df["部门"].unique():
                 if dept in question:
@@ -245,19 +252,18 @@ def analyze_excel(file_path: str, question: str):
                     result += f"📁 {dept} 的员工有：{', '.join(subset['姓名'].tolist())}\n"
                     has_answer = True
                     
-                    # 👇 【神仙升级】：如果问题里同时包含了“工资”或“平均”，就单独算这个部门的平均！
                     if "工资" in question or "平均" in question:
                         dept_avg = subset['工资'].mean()
                         result += f"💰 {dept} 部门的平均工资是：{dept_avg} 元\n"
         
-        # 👇 如果只问了全公司工资，没问部门
+        # 👇 3. 查全公司平均
         elif "工资" in question or "平均" in question:
             avg = df['工资'].mean()
             result += f"💰 全公司的平均工资是：{avg} 元\n"
             has_answer = True
             
         if not has_answer:
-            return "我读取了表格，但不知道怎么回答你的问题，你可以问问部门或者平均工资喵。"
+            return "我读取了表格，但不知道怎么回答你的问题，你可以问问具体部门或者平均工资喵。"
         return result
     except Exception as e:
         return f"读取 Excel 失败：{str(e)}"

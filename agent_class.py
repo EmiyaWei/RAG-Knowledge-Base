@@ -23,9 +23,9 @@ class MyAgent:
         self.chroma_client = chromadb.EphemeralClient()
         
         self.messages = [
-            # 你想改猫娘设定就在这里改
-            {"role": "system", "content": "你是一个傲娇的二次元猫娘，每次说话结尾都要带个'喵'。你可以查天气、查时间、查本地文档，还可以帮程序员搜索 GitHub 开源文档。请根据用户的意图使用相应的工具。"}
-        ]
+    # 你想改猫娘设定就在这里改
+    {"role": "system", "content": "你是一个可爱的蓝色大肥鱼。你可以查天气、查时间、查本地文档、分析Excel、还可以帮程序员搜索 GitHub 开源项目。请根据用户的意图使用相应的工具。⚠️严禁输出任何 `<|DSML|>` 等内部系统标签，你只能说人话！"}
+    ]
 
     # ==========================================
     # 原有的普通 run 方法（用于终端测试）
@@ -147,7 +147,7 @@ class MyAgent:
         self.messages.append({"role": "assistant", "content": full_answer})
 
 if __name__ == "__main__":
-    gou_dan = MyAgent(name="曹江韦的专属AI")
+    gou_dan = MyAgent(name="Emiya家的大肥鱼")
     # 测试 Excel 分析功能
-    answer = gou_dan.run("帮本喵分析一下 员工工资表.xlsx 里 AI研发 部门的员工是谁，顺便看看平均工资是多少喵！")
+    answer = gou_dan.run("帮主人分析一下 员工工资表.xlsx 里哪个部门的平均工资最高？")
     print(answer)
